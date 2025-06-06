@@ -38,6 +38,8 @@ const rep = new Replicache({
   name: 'todo-app',
   licenseKey: process.env.NEXT_PUBLIC_REPLICACHE_LICENSE_KEY || "",
   mutators,
+  pullURL: '/api/replicache/pull',
+  pushURL: '/api/replicache/push',
 });
 
 type ReplicacheContextType = {
