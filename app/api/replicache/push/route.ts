@@ -20,6 +20,8 @@ type PushRequest = {
   mutations: Mutation[];
 }
 
+const userEmail = 'test@test.com';
+
 export async function POST(request: NextRequest) {
   try {
     const body: PushRequest = await request.json();
@@ -29,6 +31,9 @@ export async function POST(request: NextRequest) {
 
     for (const mutation of body.mutations) {
       try {
+        // Why Math.max?
+        // If mutations are received out of order or duplicated, using just mutation.id
+        // could cause the processed mutation counter to go backwards.
         if (db.hasMutationBeenProcessed(mutation.clientID, mutation.id)) {
           processedMutations[mutation.clientID] = Math.max(
             processedMutations[mutation.clientID] || 0,
@@ -57,7 +62,7 @@ export async function POST(request: NextRequest) {
               deletedAt: null,
             };
 
-            db.createTodo(newTodo);
+            db.createTodoForUser(newTodo, userEmail);
             break;
           }
           default:
@@ -66,22 +71,15 @@ export async function POST(request: NextRequest) {
             continue;
         }
 
-        // Update the last mutation ID for this client
-        db.updateLastMutationID(mutation.clientID, mutation.id);
+        db.updateLastMutationID(mutation.clientID, userEmail, mutation.id);
         
-        // Track successfully processed mutation
-        processedMutations[mutation.clientID] = mutation.id;
-        
-        console.log(`Successfully processed mutation ${mutation.id} from client ${mutation.clientID}`);
+        processedMutations[mutation.clientID] = mutation.id;        
       } catch (mutationError) {
         console.error('Error processing mutation:', mutation, mutationError);
-        // Continue processing other mutations even if one fails
       }
     }
 
-    const response = {
-      lastMutationIDChanges: processedMutations,
-    };
+    const response = {};
 
     return NextResponse.json(response);
   } catch (error) {

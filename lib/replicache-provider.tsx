@@ -34,50 +34,59 @@ const mutators = {
   },
 };
 
-const rep = new Replicache({
-  name: 'todo-app',
-  licenseKey: process.env.NEXT_PUBLIC_REPLICACHE_LICENSE_KEY || "",
-  mutators,
-  pullURL: '/api/replicache/pull',
-  pushURL: '/api/replicache/push',
-});
+type ReplicacheInstance = Replicache<typeof mutators>;
 
 type ReplicacheContextType = {
-  rep: typeof rep;
+  rep: ReplicacheInstance | null;
   todos: Todo[];
   loading: boolean;
+  userEmail: string | null;
 }
 
 const ReplicacheContext = createContext<ReplicacheContextType | null>(null);
 
+const userEmail = 'test@test.com';
+
 export function ReplicacheProvider({ children }: { children: React.ReactNode }) {
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
+  const [rep, setRep] = useState<ReplicacheInstance | null>(null);
 
-      useEffect(() => {
-      const unsubscribe = rep.subscribe(
-        async (tx) => {
-          const todos: Todo[] = [];
-          for await (const todo of tx.scan({ prefix: 'todo/' }).values()) {
-            todos.push(todo as Todo);
-          }
-          return todos.sort((a, b) => b.createdAt - a.createdAt);
-        },
-        {
-          onData: (data) => {
-            setTodos(data);
-            setLoading(false);
-          },
+  useEffect(() => {
+    const replicacheInstance = new Replicache({
+      name: `todo-app-${userEmail}`,
+      licenseKey: process.env.NEXT_PUBLIC_REPLICACHE_LICENSE_KEY || "",
+      mutators,
+      pullURL: '/api/replicache/pull',
+      pushURL: '/api/replicache/push',
+    }) as ReplicacheInstance;
+
+    setRep(replicacheInstance);
+
+    const unsubscribe = replicacheInstance.subscribe(
+      async (tx) => {
+        const todos: Todo[] = [];
+        for await (const todo of tx.scan({ prefix: 'todo/' }).values()) {
+          todos.push(todo as Todo);
         }
-      );
+        return todos.sort((a, b) => b.createdAt - a.createdAt);
+      },
+      {
+        onData: (data: Todo[]) => {
+          setTodos(data);
+          setLoading(false);
+        },
+      }
+    );
 
     return () => {
       unsubscribe();
+      replicacheInstance.close();
     };
   }, []);
 
   return (
-    <ReplicacheContext.Provider value={{ rep, todos, loading }}>
+    <ReplicacheContext.Provider value={{ rep, todos, loading, userEmail }}>
       {children}
     </ReplicacheContext.Provider>
   );
@@ -95,18 +104,22 @@ export function useTodoMutations() {
   const { rep } = useReplicache();
 
   const createTodo = async (text: string) => {
+    if (!rep) return;
     await rep.mutate.createTodo({ text, completed: false });
   };
 
   const updateTodo = async (id: string, updates: Partial<Omit<Todo, 'id'>>) => {
+    if (!rep) return;
     await rep.mutate.updateTodo({ id, updates });
   };
 
   const deleteTodo = async (id: string) => {
+    if (!rep) return;
     await rep.mutate.deleteTodo(id);
   };
 
   const toggleTodo = async (id: string, completed: boolean) => {
+    if (!rep) return;
     await rep.mutate.updateTodo({ id, updates: { completed } });
   };
 
