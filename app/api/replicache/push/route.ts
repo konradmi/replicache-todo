@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
               createdAt: Date.now(),
               updatedAt: null,
               deletedAt: null,
+              version: 0,
             };
 
             db.createTodoForUser(newTodo, userEmail);

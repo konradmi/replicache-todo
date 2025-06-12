@@ -1,42 +1,69 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTodoDatabase } from '@/lib/database';
+import type { PullCookie } from '@/types';
 
 const userEmail = 'test@test.com';
 
-// the Reset Strategy https://doc.replicache.dev/strategies/reset
+// Row-versioning strategy implementation
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-
     const db = getTodoDatabase();
-    
-    const todos = db.getAllTodosForUser(userEmail);
-    const lastMutationIDChanges = db.getAllLastMutationIDsForUser(userEmail);
 
-    // Handle the case where the client has no previous state (cookie is null)
-    // In this case, we need to send all data with a clear operation first
-    const requestCookie = body.cookie;
+    const requestCookie: PullCookie | null = body.cookie;
     const isFirstPull = !requestCookie;
 
-    const patch = [];
+    // Get current max versions
+    const currentTodoVersion = db.getMaxVersionForUser(userEmail);
+    const currentClientMutationVersion = db.getMaxClientMutationVersionForUser(userEmail);
     
-    // If this is the first pull or we can't determine the client's state,
-    // clear everything and send all todos
+    // Calculate the new order (max of both todo and client mutation versions)
+    const newOrder = Math.max(currentTodoVersion, currentClientMutationVersion);
+
+    const patch = [];
+    let lastMutationIDChanges: Record<string, number> = {};
+
     if (isFirstPull) {
+      // First pull: clear and send all todos
       patch.push({ op: 'clear' });
+      
+      const allTodos = db.getAllTodosWithVersionForUser(userEmail);
+      allTodos.forEach(todo => {
+        patch.push({
+          op: 'put',
+          key: `todo/${todo.id}`,
+          value: todo,
+        });
+      });
+
+      lastMutationIDChanges = db.getAllLastMutationIDsForUser(userEmail);
+    } else {
+      // Delta pull: only send changes since last cookie
+      const sinceVersion = requestCookie.order;
+      
+      const changedTodos = db.getTodosChangedSinceVersion(userEmail, sinceVersion);
+      changedTodos.forEach(todo => {
+        if (todo.deletedAt) {
+          patch.push({ op: 'del', key: `todo/${todo.id}` });
+        } else {
+          patch.push({
+            op: 'put',
+            key: `todo/${todo.id}`,
+            value: todo,
+          });
+        }
+      });
+
+      lastMutationIDChanges = db.getClientMutationsChangedSinceVersion(userEmail, sinceVersion);
     }
 
-    // Add all todos to the patch
-    todos.forEach(todo => {
-      patch.push({
-        op: 'put',
-        key: `todo/${todo.id}`,
-        value: todo,
-      });
-    });
-
+    const newCookie: PullCookie = {
+      order: newOrder,
+      lastMutationID: 0, // This field is not used in our per-user implementation but kept for compatibility
+    };
+  
     const response = {
-      cookie: Date.now(),
+      cookie: newCookie,
       lastMutationIDChanges,
       patch,
     };

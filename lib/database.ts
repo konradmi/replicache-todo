@@ -15,7 +15,8 @@ export function getDatabase(): Database.Database {
         completed INTEGER NOT NULL DEFAULT 0,
         created_at INTEGER NOT NULL,
         updated_at INTEGER,
-        deleted_at INTEGER
+        deleted_at INTEGER,
+        version INTEGER NOT NULL DEFAULT 1
       )
     `);
 
@@ -25,7 +26,8 @@ export function getDatabase(): Database.Database {
         client_id TEXT PRIMARY KEY,
         user_id TEXT NOT NULL,
         last_mutation_id INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
+        updated_at INTEGER NOT NULL,
+        version INTEGER NOT NULL DEFAULT 1
       )
     `);
 
@@ -37,7 +39,13 @@ export function getDatabase(): Database.Database {
       CREATE INDEX IF NOT EXISTS idx_todos_created_at ON todos(created_at)
     `);
     db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_todos_version ON todos(version)
+    `);
+    db.exec(`
       CREATE INDEX IF NOT EXISTS idx_client_mutations_user_id ON client_mutations(user_id)
+    `);
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_client_mutations_version ON client_mutations(version)
     `);
   }
   
@@ -52,6 +60,7 @@ export interface TodoRow {
   created_at: number;
   updated_at: number | null;
   deleted_at: number | null;
+  version: number;
 }
 
 export function rowToTodo(row: TodoRow): Todo {
@@ -62,6 +71,7 @@ export function rowToTodo(row: TodoRow): Todo {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     deletedAt: row.deleted_at,
+    version: row.version,
   };
 }
 
@@ -74,6 +84,7 @@ export function todoToRow(todo: Todo, userId: string): TodoRow {
     created_at: todo.createdAt,
     updated_at: todo.updatedAt,
     deleted_at: todo.deletedAt,
+    version: todo.version,
   };
 }
 
@@ -104,19 +115,24 @@ export class TodoDatabase {
   }
 
   createTodoForUser(todo: Todo, userId: string): void {
+    // Get the current max version and increment it for the new todo
+    const currentMaxVersion = this.getMaxVersionForUser(userId);
+    const newVersion = currentMaxVersion + 1;
+
     const stmt = this.db.prepare(`
-      INSERT INTO todos (id, user_id, text, completed, created_at, updated_at, deleted_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO todos (id, user_id, text, completed, created_at, updated_at, deleted_at, version)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-    const row = todoToRow(todo, userId);
+    
     stmt.run(
-      row.id,
-      row.user_id,
-      row.text,
-      row.completed,
-      row.created_at,
-      row.updated_at,
-      row.deleted_at
+      todo.id,
+      userId,
+      todo.text,
+      todo.completed ? 1 : 0,
+      todo.createdAt,
+      todo.updatedAt,
+      todo.deletedAt,
+      newVersion
     );
   }
 
@@ -128,11 +144,12 @@ export class TodoDatabase {
       ...existing,
       ...updates,
       updatedAt: Date.now(),
+      version: existing.version + 1,
     };
 
     const stmt = this.db.prepare(`
       UPDATE todos 
-      SET text = ?, completed = ?, updated_at = ?
+      SET text = ?, completed = ?, updated_at = ?, version = ?
       WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `);
     
@@ -140,6 +157,7 @@ export class TodoDatabase {
       updatedTodo.text,
       updatedTodo.completed ? 1 : 0,
       updatedTodo.updatedAt,
+      updatedTodo.version,
       id,
       userId
     );
@@ -148,13 +166,16 @@ export class TodoDatabase {
   }
 
   deleteTodoForUser(id: string, userId: string): boolean {
+    const existing = this.getTodoByIdForUser(id, userId);
+    if (!existing) return false;
+
     const stmt = this.db.prepare(`
       UPDATE todos 
-      SET deleted_at = ?
+      SET deleted_at = ?, version = ?
       WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `);
     
-    const result = stmt.run(Date.now(), id, userId);
+    const result = stmt.run(Date.now(), existing.version + 1, id, userId);
     return result.changes > 0;
   }
 
@@ -164,21 +185,48 @@ export class TodoDatabase {
     return result.changes > 0;
   }
 
+  getMaxVersionForUser(userId: string): number {
+    const stmt = this.db.prepare(`
+      SELECT MAX(version) as max_version FROM todos WHERE user_id = ?
+    `);
+    const result = stmt.get(userId) as { max_version: number | null } | undefined;
+    return result?.max_version || 0;
+  }
+
+  getTodosChangedSinceVersion(userId: string, sinceVersion: number): Todo[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM todos 
+      WHERE user_id = ? AND version > ?
+      ORDER BY version ASC
+    `);
+    const rows = stmt.all(userId, sinceVersion) as TodoRow[];
+    return rows.map(rowToTodo);
+  }
+
+  getAllTodosWithVersionForUser(userId: string): Todo[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM todos 
+      WHERE user_id = ? AND deleted_at IS NULL 
+      ORDER BY version ASC
+    `);
+    const rows = stmt.all(userId) as TodoRow[];
+    return rows.map(rowToTodo);
+  }
+
   close(): void {
     if (this.db) {
       this.db.close();
     }
   }
 
-  // Client mutation tracking methods with user context
-  getClientInfo(clientID: string): { userId: string; lastMutationID: number } | null {
+  getClientInfo(clientID: string): { userId: string; lastMutationID: number; version: number } | null {
     const stmt = this.db.prepare(`
-      SELECT user_id, last_mutation_id 
+      SELECT user_id, last_mutation_id, version
       FROM client_mutations 
       WHERE client_id = ?
     `);
-    const result = stmt.get(clientID) as { user_id: string; last_mutation_id: number } | undefined;
-    return result ? { userId: result.user_id, lastMutationID: result.last_mutation_id } : null;
+    const result = stmt.get(clientID) as { user_id: string; last_mutation_id: number; version: number } | undefined;
+    return result ? { userId: result.user_id, lastMutationID: result.last_mutation_id, version: result.version } : null;
   }
 
   getLastMutationID(clientID: string): number {
@@ -187,11 +235,15 @@ export class TodoDatabase {
   }
 
   updateLastMutationID(clientID: string, userId: string, mutationID: number): void {
+    // Get current max version for client mutations for this user
+    const currentMaxVersion = this.getMaxClientMutationVersionForUser(userId);
+    const newVersion = currentMaxVersion + 1;
+
     const stmt = this.db.prepare(`
-      INSERT OR REPLACE INTO client_mutations (client_id, user_id, last_mutation_id, updated_at)
-      VALUES (?, ?, ?, ?)
+      INSERT OR REPLACE INTO client_mutations (client_id, user_id, last_mutation_id, updated_at, version)
+      VALUES (?, ?, ?, ?, ?)
     `);
-    stmt.run(clientID, userId, mutationID, Date.now());
+    stmt.run(clientID, userId, mutationID, Date.now(), newVersion);
   }
 
   getAllLastMutationIDsForUser(userId: string): Record<string, number> {
@@ -207,6 +259,29 @@ export class TodoDatabase {
       lastMutationIDChanges[result.client_id] = result.last_mutation_id;
     }
     return lastMutationIDChanges;
+  }
+
+  getClientMutationsChangedSinceVersion(userId: string, sinceVersion: number): Record<string, number> {
+    const stmt = this.db.prepare(`
+      SELECT client_id, last_mutation_id 
+      FROM client_mutations
+      WHERE user_id = ? AND version > ?
+    `);
+    const results = stmt.all(userId, sinceVersion) as Array<{ client_id: string; last_mutation_id: number }>;
+    
+    const lastMutationIDChanges: Record<string, number> = {};
+    for (const result of results) {
+      lastMutationIDChanges[result.client_id] = result.last_mutation_id;
+    }
+    return lastMutationIDChanges;
+  }
+
+  getMaxClientMutationVersionForUser(userId: string): number {
+    const stmt = this.db.prepare(`
+      SELECT MAX(version) as max_version FROM client_mutations WHERE user_id = ?
+    `);
+    const result = stmt.get(userId) as { max_version: number | null } | undefined;
+    return result?.max_version || 0;
   }
 
   hasMutationBeenProcessed(clientID: string, mutationID: number): boolean {

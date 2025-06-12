@@ -6,9 +6,9 @@ import { Todo } from '@/types';
 
 // Define mutators
 const mutators = {
-  createTodo: async (tx: WriteTransaction, todo: Omit<Todo, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt'>) => {
+  createTodo: async (tx: WriteTransaction, todo: Omit<Todo, 'id' | 'createdAt' | 'updatedAt' | 'deletedAt' | 'version'>) => {
     const id = crypto.randomUUID();
-    const newTodo: Todo = {
+    const newTodo: Omit<Todo, 'version'> = { // Version will be set properly by the server
       id,
       text: todo.text,
       completed: todo.completed,
@@ -24,7 +24,7 @@ const mutators = {
       const updatedTodo = { 
         ...existing, 
         ...updates, 
-        updatedAt: Date.now() 
+        updatedAt: Date.now(),
       };
       await tx.set(`todo/${id}`, updatedTodo);
     }
