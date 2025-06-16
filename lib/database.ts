@@ -140,11 +140,15 @@ export class TodoDatabase {
     const existing = this.getTodoByIdForUser(id, userId);
     if (!existing) return false;
 
+    // Use current max version for the user, not just existing.version + 1
+    const currentMaxVersion = this.getMaxVersionForUser(userId);
+    const newVersion = currentMaxVersion + 1;
+
     const updatedTodo: Todo = {
       ...existing,
       ...updates,
       updatedAt: Date.now(),
-      version: existing.version + 1,
+      version: newVersion,
     };
 
     const stmt = this.db.prepare(`
@@ -168,6 +172,9 @@ export class TodoDatabase {
   deleteTodoForUser(id: string, userId: string): boolean {
     const existing = this.getTodoByIdForUser(id, userId);
     if (!existing) return false;
+    // Use current max version for the user, not just existing.version + 1
+    const currentMaxVersion = this.getMaxVersionForUser(userId);
+    const newVersion = currentMaxVersion + 1;
 
     const stmt = this.db.prepare(`
       UPDATE todos 
@@ -175,13 +182,7 @@ export class TodoDatabase {
       WHERE id = ? AND user_id = ? AND deleted_at IS NULL
     `);
     
-    const result = stmt.run(Date.now(), existing.version + 1, id, userId);
-    return result.changes > 0;
-  }
-
-  hardDeleteTodoForUser(id: string, userId: string): boolean {
-    const stmt = this.db.prepare(`DELETE FROM todos WHERE id = ? AND user_id = ?`);
-    const result = stmt.run(id, userId);
+    const result = stmt.run(Date.now(), newVersion, id, userId);
     return result.changes > 0;
   }
 

@@ -5,15 +5,40 @@ import type { Todo } from '@/types';
 type CreateTodoArgs = {
   text: string;
   completed: boolean;
-}
+};
 
-type Mutation = {
-  id: number;
-  clientID: string;
-  name: string;
-  args: CreateTodoArgs;
-  timestamp: number;
-}
+type UpdateTodoArgs = {
+  id: string;
+  updates: Partial<{
+    text: string;
+    completed: boolean;
+  }>;
+};
+
+type DeleteTodoArgs = string
+
+type Mutation =
+  | {
+      id: number;
+      clientID: string;
+      name: 'createTodo';
+      args: CreateTodoArgs;
+      timestamp: number;
+    }
+  | {
+      id: number;
+      clientID: string;
+      name: 'updateTodo';
+      args: UpdateTodoArgs;
+      timestamp: number;
+    }
+  | {
+      id: number;
+      clientID: string;
+      name: 'deleteTodo';
+      args: DeleteTodoArgs;
+      timestamp: number;
+    };
 
 type PushRequest = {
   clientGroupID: string;
@@ -29,7 +54,7 @@ export async function POST(request: NextRequest) {
     const db = getTodoDatabase();
     const processedMutations: Record<string, number> = {};
 
-    for (const mutation of body.mutations) {
+    for (const mutation of body.mutations as Mutation[]) {
       try {
         // Why Math.max?
         // If mutations are received out of order or duplicated, using just mutation.id
@@ -52,7 +77,6 @@ export async function POST(request: NextRequest) {
         switch (mutation.name) {
           case 'createTodo': {
             const { text, completed } = mutation.args;
-            
             const newTodo: Todo = {
               id: crypto.randomUUID(),
               text,
@@ -62,14 +86,22 @@ export async function POST(request: NextRequest) {
               deletedAt: null,
               version: 0,
             };
-
             db.createTodoForUser(newTodo, userEmail);
             break;
           }
-          default:
-            console.log('Unknown mutation:', mutation.name);
-            // Don't process unknown mutations, but don't fail either
-            continue;
+          case 'updateTodo': {
+            const { id, updates } = mutation.args;
+            db.updateTodoForUser(id, userEmail, updates);
+            break;
+          }
+          case 'deleteTodo': {
+            const id = mutation.args;
+            db.deleteTodoForUser(id, userEmail);
+            break;
+          }
+          default: {
+            throw new Error(`Unknown mutation: ${String((mutation as { name: string }).name)}`);
+          }
         }
 
         db.updateLastMutationID(mutation.clientID, userEmail, mutation.id);
