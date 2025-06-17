@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Replicache, type WriteTransaction } from 'replicache';
 import { Todo } from '@/types';
+import { useSession } from 'next-auth/react';
 
 // Define mutators
 const mutators = {
@@ -45,14 +46,15 @@ type ReplicacheContextType = {
 
 const ReplicacheContext = createContext<ReplicacheContextType | null>(null);
 
-const userEmail = 'test@test.com';
-
 export function ReplicacheProvider({ children }: { children: React.ReactNode }) {
+  const { data: session } = useSession();
+  const userEmail = session?.user?.email ?? null;
   const [todos, setTodos] = useState<Todo[]>([]);
   const [loading, setLoading] = useState(true);
   const [rep, setRep] = useState<ReplicacheInstance | null>(null);
 
   useEffect(() => {
+    if (!userEmail) return;
     const replicacheInstance = new Replicache({
       name: `todo-app-${userEmail}`,
       licenseKey: process.env.NEXT_PUBLIC_REPLICACHE_LICENSE_KEY || "",
@@ -83,7 +85,7 @@ export function ReplicacheProvider({ children }: { children: React.ReactNode }) 
       unsubscribe();
       replicacheInstance.close();
     };
-  }, []);
+  }, [userEmail]);
 
   return (
     <ReplicacheContext.Provider value={{ rep, todos, loading, userEmail }}>

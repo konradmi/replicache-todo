@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ReplicacheProvider } from "@/lib/replicache-provider";
+import { AuthProvider } from "@/lib/auth-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,9 +29,11 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <ReplicacheProvider>
-          {children}
-        </ReplicacheProvider>
+        <AuthProvider>
+          <ReplicacheProvider>
+            {children}
+          </ReplicacheProvider>
+        </AuthProvider>
       </body>
     </html>
   );

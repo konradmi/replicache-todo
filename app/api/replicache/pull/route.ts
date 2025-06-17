@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getTodoDatabase } from '@/lib/database';
 import type { PullCookie } from '@/types';
+import { getServerSession } from "next-auth";
+import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 
-const userEmail = 'test@test.com';
-
-// Row-versioning strategy implementation
 export async function POST(request: NextRequest) {
+  const session = await getServerSession(authOptions);
+  if (!session?.user?.email) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const userEmail = session.user.email;
+
   try {
     const body = await request.json();
     const db = getTodoDatabase();
