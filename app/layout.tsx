@@ -5,6 +5,7 @@ import { AuthProvider } from "@/lib/auth-provider";
 import "./globals.css";
 import React from "react";
 import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
+import OfflineStatus from "@/components/OfflineStatus";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,8 +34,9 @@ export default function RootLayout({
       >
         <AuthProvider>
           <ReplicacheProvider>
+            <OfflineStatus />
             <ServiceWorkerRegister />
-              {children}
+            {children}
           </ReplicacheProvider>
         </AuthProvider>
       </body>
