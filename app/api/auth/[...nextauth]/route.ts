@@ -15,7 +15,6 @@ const authOptions: AuthOptions = {
   },
   callbacks: {
     async session({ session, token }: { session: Session; token: JWT }) {
-      // Attach the user's email to the session
       if (session.user) {
         session.user.email = token.email as string;
       }

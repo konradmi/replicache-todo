@@ -3,6 +3,8 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { ReplicacheProvider } from "@/lib/replicache-provider";
 import { AuthProvider } from "@/lib/auth-provider";
 import "./globals.css";
+import React from "react";
+import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -31,7 +33,8 @@ export default function RootLayout({
       >
         <AuthProvider>
           <ReplicacheProvider>
-            {children}
+            <ServiceWorkerRegister />
+              {children}
           </ReplicacheProvider>
         </AuthProvider>
       </body>
